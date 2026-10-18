@@ -582,6 +582,7 @@ static constexpr __host__ __device__ int calc_nwarps(ggml_type type, int ncols_d
 static constexpr __host__ __device__ bool mmvq_two_rows_ncols1(ggml_type type) {
     switch (type) {
         case GGML_TYPE_Q1_0:
+        case GGML_TYPE_Q2_0:
         case GGML_TYPE_Q2_K:
         case GGML_TYPE_Q3_K:
         case GGML_TYPE_IQ1_S:
@@ -738,7 +739,12 @@ static __global__ void mul_mat_vec_q(
     float tmp_gate[ncols_dst][rows_per_cuda_block] = {{0.0f}};
 
     const block_q8_1 * y = ((const block_q8_1 *) vy) + sample_y*stride_sample_y + channel_y*stride_channel_y;
-    const int kbx_offset = sample_x*stride_sample_x + channel_x*stride_channel_x + row0*stride_row_x;
+    int kbx_offsets[rows_per_cuda_block];
+#pragma unroll
+    for (int i = 0; i < rows_per_cuda_block; ++i) {
+        const int row = row0 + i < stride_col_dst ? row0 + i : row0;
+        kbx_offsets[i] = sample_x*stride_sample_x + channel_x*stride_channel_x + row*stride_row_x;
+    }
 
     for (int kbx = tid / (qi/vdr); kbx < blocks_per_row_x; kbx += blocks_per_iter) {
         const int kby = kbx * (qk/QK8_1); // y block index that aligns with kbx
@@ -755,7 +761,7 @@ static __global__ void mul_mat_vec_q(
             if (kbx_pf < blocks_per_row_x) {
 #pragma unroll
                 for (int i = 0; i < rows_per_cuda_block; ++i) {
-                    const size_t off = (size_t)(kbx_offset + i*stride_row_x + kbx_pf) * ggml_cuda_type_traits<type>::bs;
+                    const size_t off = (size_t)(kbx_offsets[i] + kbx_pf) * ggml_cuda_type_traits<type>::bs;
                     mmvq_prefetch_l2((const char *) vx + off);
                     if constexpr (has_fusion) {
                         if (use_gate) {
@@ -772,11 +778,11 @@ static __global__ void mul_mat_vec_q(
 #pragma unroll
             for (int i = 0; i < rows_per_cuda_block; ++i) {
                 tmp[j][i] += vec_dot_q_cuda(
-                    vx, &y[j*stride_col_y + kby], kbx_offset + i*stride_row_x + kbx, kqs);
+                    vx, &y[j*stride_col_y + kby], kbx_offsets[i] + kbx, kqs);
                 if constexpr (has_fusion) {
                     if (use_gate) {
                         tmp_gate[j][i] += vec_dot_q_cuda(
-                            vgate, &y[j*stride_col_y + kby], kbx_offset + i*stride_row_x + kbx, kqs);
+                            vgate, &y[j*stride_col_y + kby], kbx_offsets[i] + kbx, kqs);
                     }
                 }
             }

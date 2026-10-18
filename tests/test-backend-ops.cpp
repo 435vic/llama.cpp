@@ -10736,6 +10736,9 @@ static std::vector<std::unique_ptr<test_case>> make_test_cases_eval() {
         test_cases.emplace_back(new test_mul_mat(type_a,    GGML_TYPE_F32, 16,  8, 16*256, { 1,  1}, {1, 1}));
     }
 
+    // Odd output rows and multiple K iterations in the Q2_0 mat-vec path.
+    test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q2_0, GGML_TYPE_F32, 33, 1, 8192, {2, 3}, {1, 2}));
+
     // Multi-column MMVQ coverage for the Q4_K weight-reuse path and a Q5_K control.
     for (ggml_type type_a : { GGML_TYPE_Q4_K, GGML_TYPE_Q5_K }) {
         for (int n = 1; n <= 8; ++n) {
